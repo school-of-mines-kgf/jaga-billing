@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Yesh Billing System</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap"
+        rel="stylesheet">
+</head>
+
+<body>
+    <!-- Login Page -->
+    <div id="loginPage" class="login-container">
+        <div class="login-card">
+            <div class="login-logo">
+                <img src="logo.jpeg" alt="Company Logo">
+            </div>
+            <h2>Billing System Login</h2>
+            <p class="login-subtitle">Enter your credentials to access the billing system</p>
+            <form id="loginForm">
+                <div class="input-group">
+                    <label for="password">Password</label>
+                    <div class="password-wrapper">
+                        <input type="password" id="password" placeholder="Enter password" required>
+                        <span class="toggle-password" onclick="togglePassword()">👁️</span>
+                    </div>
+                </div>
+                <button type="submit" class="login-btn">
+                    <span>Login</span>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M5 12h14M12 5l7 7-7 7" />
+                    </svg>
+                </button>
+            </form>
+            <p id="errorMsg" class="error-message"></p>
+        </div>
+    </div>
+
+    <!-- Main Billing Page -->
+    <div id="billingPage" class="billing-container hidden">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-left">
+                <img src="logo.jpeg" alt="Logo" class="header-logo">
+                <h1>Billing System</h1>
+            </div>
+            <div class="header-right">
+                <span id="currentDate" class="date-display"></span>
+                <button class="logout-btn" onclick="logout()">Logout</button>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Customer Details Section -->
+            <section class="customer-section">
+                <h2 class="section-title">Customer Details</h2>
+                <div class="customer-form">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="customerName">Customer Name</label>
+                            <input type="text" id="customerName" placeholder="Enter customer name">
+                        </div>
+                        <div class="form-group">
+                            <label for="customerPhone">Phone Number</label>
+                            <input type="tel" id="customerPhone" placeholder="Enter phone number">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="customerAddress">Address</label>
+                            <input type="text" id="customerAddress" placeholder="Enter address">
+                        </div>
+                        <div class="form-group">
+                            <label for="billDate">Bill Date</label>
+                            <input type="date" id="billDate">
+                        </div>
+                        <div class="form-group bill-number-group">
+                            <label for="billNumber">Bill No.</label>
+                            <input type="text" id="billNumber" placeholder="1">
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Items Section -->
+            <section class="items-section">
+                <h2 class="section-title">Bill Items</h2>
+                <div class="add-item-form">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="itemName">Item Name</label>
+                            <input type="text" id="itemName" placeholder="Enter item name">
+                        </div>
+                        <div class="form-group">
+                            <label for="itemQty">Quantity</label>
+                            <input type="number" id="itemQty" placeholder="Qty" min="1" value="1">
+                        </div>
+                        <div class="form-group">
+                            <label for="itemPrice">Price (₹)</label>
+                            <input type="number" id="itemPrice" placeholder="Price" min="0" step="0.01">
+                        </div>
+                        <div class="form-group">
+                            <label for="itemCourier">Courier (₹)</label>
+                            <input type="number" id="itemCourier" placeholder="0" min="0" step="1" value="0">
+                        </div>
+                        <button class="add-item-btn" onclick="addItem()">+ Add Item</button>
+                    </div>
+                </div>
+
+                <!-- Items Table -->
+                <div class="table-container">
+                    <table class="items-table">
+                        <thead>
+                            <tr>
+                                <th>S.No</th>
+                                <th>Item Name</th>
+                                <th>Quantity</th>
+                                <th>Price (₹)</th>
+                                <th>Courier (₹)</th>
+                                <th>Total (₹)</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="itemsTableBody">
+                            <!-- Items will be added here dynamically -->
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Totals -->
+                <div class="totals-section">
+                    <div class="total-row">
+                        <span>Subtotal:</span>
+                        <span id="subtotal">₹0.00</span>
+                    </div>
+                    <div class="total-row courier-row">
+                        <span>Courier Charges:</span>
+                        <div class="courier-input-wrapper">
+                            <span>₹</span>
+                            <input type="number" id="courierCharges" value="0" min="0" step="1"
+                                onchange="updateTotals()">
+                        </div>
+                    </div>
+                    <div class="total-row grand-total">
+                        <span>Grand Total:</span>
+                        <span id="grandTotal">₹0.00</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Action Buttons -->
+            <div class="action-buttons">
+                <button class="btn btn-secondary" onclick="clearBill()">Clear Bill</button>
+                <button class="btn btn-primary" onclick="generateBill()">Generate Bill</button>
+                <button class="btn btn-success" onclick="printBill()">Print Bill</button>
+                <button class="btn btn-history" onclick="showHistory()">📋 View History</button>
+            </div>
+        </main>
+
+        <!-- Bill Preview Modal -->
+        <div id="billModal" class="modal hidden">
+            <div class="modal-content bill-preview">
+                <button class="close-modal" onclick="closeModal()">&times;</button>
+                <div id="billContent" class="bill-content">
+                    <!-- Bill will be generated here -->
+                </div>
+                <div class="modal-actions">
+                    <button class="btn btn-primary" onclick="saveBillToHistory()">💾 Save to History</button>
+                    <button class="btn btn-primary" onclick="printBillContent()">Print</button>
+                    <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- History Modal -->
+        <div id="historyModal" class="modal hidden">
+            <div class="modal-content history-modal">
+                <button class="close-modal" onclick="closeHistoryModal()">&times;</button>
+                <div class="history-header">
+                    <h2>📋 Bill History</h2>
+                    <div class="history-actions">
+                        <button class="btn btn-export" onclick="exportDatabase()">📥 Export</button>
+                        <label class="btn btn-import">
+                            📤 Import
+                            <input type="file" id="importFile" accept=".json" onchange="importDatabase(event)" hidden>
+                        </label>
+                        <button class="btn btn-danger-small" onclick="clearAllHistory()">🗑️ Clear All</button>
+                    </div>
+                </div>
+                <div id="historyContent" class="history-content">
+                    <!-- History will be loaded here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+
+</html>
