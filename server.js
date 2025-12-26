@@ -105,6 +105,50 @@ const server = http.createServer((req, res) => {
         return;
     }
 
+    // Get all history (for syncing across devices)
+    if (req.url === '/api/get-history' && req.method === 'GET') {
+        const db = readDatabase();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+            success: true,
+            bills: db.bills || [],
+            lastBillNumber: db.lastBillNumber || 0
+        }));
+        return;
+    }
+
+    // Save full history (for syncing from client)
+    if (req.url === '/api/save-history' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        req.on('end', () => {
+            try {
+                const { bills, lastBillNumber } = JSON.parse(body);
+                const db = readDatabase();
+
+                // Merge histories - add any bills not already in server
+                const existingBillNumbers = new Set(db.bills.map(b => b.billNumber));
+                const newBills = bills.filter(b => !existingBillNumbers.has(b.billNumber));
+
+                db.bills = [...newBills, ...db.bills];
+                db.lastBillNumber = Math.max(db.lastBillNumber || 0, lastBillNumber || 0);
+
+                writeDatabase(db);
+
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({
+                    success: true,
+                    message: 'History synced!',
+                    totalBills: db.bills.length
+                }));
+            } catch (error) {
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: false, error: error.message }));
+            }
+        });
+        return;
+    }
+
     // Serve static files
     let filePath = req.url === '/' ? '/index.html' : req.url;
     filePath = path.join(__dirname, filePath);
@@ -128,17 +172,34 @@ const server = http.createServer((req, res) => {
     });
 });
 
-server.listen(PORT, () => {
+// Get local IP address for network access
+const os = require('os');
+function getLocalIP() {
+    const interfaces = os.networkInterfaces();
+    for (const name of Object.keys(interfaces)) {
+        for (const iface of interfaces[name]) {
+            if (iface.family === 'IPv4' && !iface.internal) {
+                return iface.address;
+            }
+        }
+    }
+    return 'localhost';
+}
+
+const localIP = getLocalIP();
+
+server.listen(PORT, '0.0.0.0', () => {
     console.log('');
-    console.log('='.repeat(50));
+    console.log('='.repeat(60));
     console.log('  JAGA SILK PRODUCTS - Billing System Server');
-    console.log('='.repeat(50));
+    console.log('='.repeat(60));
     console.log('');
-    console.log(`  Server running at: http://localhost:${PORT}`);
+    console.log(`  📱 FOR PHONES/OTHER DEVICES: http://${localIP}:${PORT}`);
+    console.log(`  💻 FOR THIS LAPTOP: http://localhost:${PORT}`);
     console.log('');
-    console.log('  Open this URL in your browser to use the app');
-    console.log('  All bills will be saved to database.json');
+    console.log('  ✅ All devices using the same URL will share history!');
+    console.log('  💾 All bills are saved to database.json');
     console.log('');
     console.log('  Press Ctrl+C to stop the server');
-    console.log('='.repeat(50));
+    console.log('='.repeat(60));
 });

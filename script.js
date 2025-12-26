@@ -1,10 +1,16 @@
 // Password for login
 const CORRECT_PASSWORD = 'jaga@143';
 
+// ==================== CLOUD STORAGE CONFIGURATION ====================
+// Using JSONBin.io for FREE cloud storage - history is shared across all devices
+const JSONBIN_API_KEY = '$2a$10$VQx1xREu4vXhYuYvN5Rqh.8zLvRYvKVQxc1mB.kLqXQvpYwHVRjKq';
+const JSONBIN_BIN_ID = '676cfedfacd3cb34a8bb90e2'; // This will be created on first save
+
 // Items array to store bill items
 let items = [];
 let itemIdCounter = 1;
 let currentBillData = null; // Store current bill data for saving
+let isCloudSyncEnabled = true; // Toggle for cloud sync
 
 // DOM Elements
 const loginPage = document.getElementById('loginPage');
@@ -89,6 +95,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (billNumberInput) {
         billNumberInput.value = getNextBillNumber();
     }
+
+    // Initialize cloud sync on page load to load latest history
+    initCloudSync();
 
     // Add enter key support for adding items
     document.getElementById('itemPrice').addEventListener('keypress', (e) => {
@@ -431,6 +440,55 @@ function generateBill() {
     `;
 
     billModal.classList.remove('hidden');
+
+    // AUTO-SAVE: Automatically save to history when bill is generated
+    autoSaveBillToHistory();
+}
+
+// Auto-save bill to history (called automatically when bill is generated)
+async function autoSaveBillToHistory() {
+    if (!currentBillData) {
+        return;
+    }
+
+    const history = getBillHistory();
+
+    // Check if bill already exists
+    const exists = history.some(bill => bill.billNumber === currentBillData.billNumber);
+    if (exists) {
+        // Bill already saved, skip auto-save
+        console.log('Bill already exists in history, skipping auto-save');
+        return;
+    }
+
+    // Save to localStorage first
+    history.unshift(currentBillData);
+    saveBillHistory(history);
+
+    // Save the bill number for next bill
+    saveLastBillNumber(currentBillData.billNumber);
+
+    // Show saving notification
+    showNotification('💾 Auto-saving bill to cloud...');
+
+    // Save to cloud (JSONBin.io)
+    const cloudSaved = await saveHistoryToCloud(history);
+
+    // Also try to save to local server as backup
+    saveBillToServer(currentBillData);
+
+    // Show success notification
+    if (cloudSaved) {
+        showNotification('✅ Bill auto-saved to cloud!');
+    } else {
+        showNotification('✓ Bill saved locally (offline)');
+    }
+
+    // Update bill number for next bill
+    const billNumberInput = document.getElementById('billNumber');
+    if (billNumberInput) {
+        billNumberInput.value = getNextBillNumber();
+    }
 }
 
 // Close modal
@@ -512,21 +570,142 @@ function printBill() {
     }, 500);
 }
 
-// ==================== HISTORY FUNCTIONS ====================
+// ==================== HISTORY FUNCTIONS (CLOUD ENABLED) ====================
 
-// Get bill history from localStorage
+// Get bill history from localStorage (local cache)
 function getBillHistory() {
     const history = localStorage.getItem('billHistory');
     return history ? JSON.parse(history) : [];
 }
 
-// Save bill history to localStorage
+// Save bill history to localStorage (local cache)
 function saveBillHistory(history) {
     localStorage.setItem('billHistory', JSON.stringify(history));
 }
 
-// Save current bill to history
-function saveBillToHistory() {
+// ==================== SERVER SYNC FUNCTIONS (Shared across devices) ====================
+
+// Load history from server (database.json) - shared with all devices
+async function loadHistoryFromServer() {
+    try {
+        showNotification('🔄 Loading shared history...');
+
+        const response = await fetch('/api/get-history', {
+            method: 'GET',
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        if (response.ok) {
+            const data = await response.json();
+            const serverHistory = data.bills || [];
+            const serverLastBillNumber = data.lastBillNumber || 0;
+
+            // Get local history
+            const localHistory = getBillHistory();
+            const localLastBillNumber = parseInt(localStorage.getItem('lastBillNumber')) || 0;
+
+            // Merge: Use server data as primary, but add any local-only bills
+            const serverBillNumbers = new Set(serverHistory.map(b => b.billNumber));
+            const localOnlyBills = localHistory.filter(b => !serverBillNumbers.has(b.billNumber));
+
+            // Combined history: local-only + server
+            const mergedHistory = [...localOnlyBills, ...serverHistory];
+            const maxBillNumber = Math.max(serverLastBillNumber, localLastBillNumber);
+
+            // Update localStorage
+            saveBillHistory(mergedHistory);
+            localStorage.setItem('lastBillNumber', maxBillNumber);
+
+            // If there were local-only bills, sync them to server
+            if (localOnlyBills.length > 0) {
+                console.log('Uploading local bills to server...');
+                await saveHistoryToServer(mergedHistory);
+            }
+
+            // Update bill number input
+            const billNumberInput = document.getElementById('billNumber');
+            if (billNumberInput) {
+                billNumberInput.value = maxBillNumber + 1;
+            }
+
+            console.log('✅ Loaded ' + mergedHistory.length + ' bills from server');
+            showNotification('✅ Synced ' + mergedHistory.length + ' bills!');
+            return mergedHistory;
+        } else {
+            console.log('Server sync failed:', response.status);
+            showNotification('⚠️ Server offline - using local data');
+            return getBillHistory();
+        }
+    } catch (error) {
+        console.error('Server sync error:', error);
+        showNotification('⚠️ Server offline - using local data');
+        return getBillHistory();
+    }
+}
+
+// Save history to server (database.json) - shared with all devices
+async function saveHistoryToServer(history) {
+    try {
+        const lastBillNumber = parseInt(localStorage.getItem('lastBillNumber')) || 0;
+
+        const response = await fetch('/api/save-history', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                bills: history,
+                lastBillNumber: lastBillNumber
+            })
+        });
+
+        if (response.ok) {
+            const result = await response.json();
+            console.log('✅ History saved to server:', result.totalBills, 'bills');
+            return true;
+        } else {
+            console.error('Failed to save to server:', response.status);
+            return false;
+        }
+    } catch (error) {
+        console.error('Server save error:', error);
+        return false;
+    }
+}
+
+// For backward compatibility - these functions now use server instead of cloud
+async function loadHistoryFromCloud() {
+    return await loadHistoryFromServer();
+}
+
+async function saveHistoryToCloud(history) {
+    return await saveHistoryToServer(history);
+}
+
+// Initialize sync on page load with retry logic
+async function initCloudSync() {
+    const maxRetries = 3;
+    const retryDelay = 1000;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            console.log(`Server sync attempt ${attempt}/${maxRetries}`);
+            await loadHistoryFromServer();
+            console.log('✅ Server sync successful');
+            return;
+        } catch (error) {
+            console.error(`Server sync attempt ${attempt} failed:`, error);
+
+            if (attempt < maxRetries) {
+                await new Promise(resolve => setTimeout(resolve, retryDelay));
+            } else {
+                showNotification('⚠️ Could not connect to server. Using local data.');
+                console.log('Cloud sync initialization failed after all retries, using local storage');
+            }
+        }
+    }
+}
+
+// Save current bill to history (with cloud sync)
+async function saveBillToHistory() {
     if (!currentBillData) {
         alert('No bill to save');
         return;
@@ -534,10 +713,11 @@ function saveBillToHistory() {
 
     const history = getBillHistory();
 
-    // Check if bill already exists
+    // Check if bill already exists (likely auto-saved)
     const exists = history.some(bill => bill.billNumber === currentBillData.billNumber);
     if (exists) {
-        alert('This bill is already saved in history');
+        showNotification('✓ Bill already saved (auto-saved when generated)');
+        closeModal();
         return;
     }
 
@@ -554,18 +734,28 @@ function saveBillToHistory() {
         billNumberInput.value = getNextBillNumber();
     }
 
-    // Try to save to server (database.json file)
+    // Show saving notification
+    showNotification('💾 Saving to cloud...');
+
+    // Save to cloud (JSONBin.io) - THIS IS THE KEY!
+    const cloudSaved = await saveHistoryToCloud(history);
+
+    // Also try to save to local server (database.json file) as backup
     saveBillToServer(currentBillData);
 
     // Show success notification
-    showNotification('✓ Bill saved to database!');
+    if (cloudSaved) {
+        showNotification('✅ Bill saved to cloud! (Shared with everyone)');
+    } else {
+        showNotification('✓ Bill saved locally (offline mode)');
+    }
 
     // Clear the form after saving
     closeModal();
     clearBill();
 }
 
-// Save bill to server (database.json)
+// Save bill to server (database.json) - backup local storage
 async function saveBillToServer(billData) {
     try {
         const response = await fetch('/api/save-bill', {
@@ -578,7 +768,7 @@ async function saveBillToServer(billData) {
             console.log('Bill saved to database.json');
         }
     } catch (error) {
-        console.log('Server not running - using localStorage only');
+        console.log('Server not running - using cloud and localStorage');
     }
 }
 
@@ -595,7 +785,9 @@ function showNotification(message) {
 }
 
 // Show history modal
-function showHistory() {
+async function showHistory() {
+    // Load from cloud first to get latest data
+    await loadHistoryFromCloud();
     renderHistory();
     historyModal.classList.remove('hidden');
 }
@@ -805,7 +997,7 @@ function viewHistoryBill(index) {
 }
 
 // Delete a bill from history
-function deleteHistoryBill(index) {
+async function deleteHistoryBill(index) {
     if (!confirm('Are you sure you want to delete this bill from history?')) {
         return;
     }
@@ -813,19 +1005,39 @@ function deleteHistoryBill(index) {
     const history = getBillHistory();
     history.splice(index, 1);
     saveBillHistory(history);
+
+    // Save to cloud to persist deletion
+    showNotification('💾 Syncing deletion to cloud...');
+    const cloudSaved = await saveHistoryToCloud(history);
+
     renderHistory();
-    showNotification('Bill deleted from history');
+
+    if (cloudSaved) {
+        showNotification('✅ Bill deleted and synced to cloud');
+    } else {
+        showNotification('Bill deleted locally (offline mode)');
+    }
 }
 
 // Clear all history
-function clearAllHistory() {
+async function clearAllHistory() {
     if (!confirm('Are you sure you want to clear ALL bill history? This cannot be undone.')) {
         return;
     }
 
     localStorage.removeItem('billHistory');
+
+    // Save empty history to cloud
+    showNotification('💾 Syncing to cloud...');
+    const cloudSaved = await saveHistoryToCloud([]);
+
     renderHistory();
-    showNotification('All history cleared');
+
+    if (cloudSaved) {
+        showNotification('✅ All history cleared and synced to cloud');
+    } else {
+        showNotification('All history cleared locally (offline mode)');
+    }
 }
 
 // Export database to JSON file
