@@ -469,20 +469,13 @@ async function autoSaveBillToHistory() {
     saveLastBillNumber(currentBillData.billNumber);
 
     // Show saving notification
-    showNotification('💾 Auto-saving bill to cloud...');
+    showNotification('💾 Auto-saving bill...');
 
-    // Save to cloud (JSONBin.io)
-    const cloudSaved = await saveHistoryToCloud(history);
-
-    // Also try to save to local server as backup
-    saveBillToServer(currentBillData);
+    // Save to browser storage
+    await saveHistoryToCloud(history);
 
     // Show success notification
-    if (cloudSaved) {
-        showNotification('✅ Bill auto-saved to cloud!');
-    } else {
-        showNotification('✓ Bill saved locally (offline)');
-    }
+    showNotification('✅ Bill auto-saved!');
 
     // Update bill number for next bill
     const billNumberInput = document.getElementById('billNumber');
@@ -583,43 +576,57 @@ function saveBillHistory(history) {
     localStorage.setItem('billHistory', JSON.stringify(history));
 }
 
-// ==================== SERVER SYNC FUNCTIONS (Shared across devices) ====================
+// ==================== BROWSER STORAGE (Static Site - No Server) ====================
 
-// Load history from server (database.json) - shared with all devices
-async function loadHistoryFromServer() {
+// Initialize storage on page load
+function initCloudSync() {
+    // Simply load from localStorage - no server sync needed
+    const history = getBillHistory();
+    console.log('📦 Loaded ' + history.length + ' bills from browser storage');
+
+    if (history.length > 0) {
+        showNotification('✅ Loaded ' + history.length + ' saved bills');
+    }
+}
+
+// Load history from JSONBin.io cloud - SHARED with everyone
+async function loadHistoryFromCloud() {
     try {
-        showNotification('🔄 Loading shared history...');
+        showNotification('🔄 Loading shared history from cloud...');
 
-        const response = await fetch('/api/get-history', {
+        const response = await fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}/latest`, {
             method: 'GET',
-            headers: { 'Content-Type': 'application/json' }
+            headers: {
+                'X-Master-Key': JSONBIN_API_KEY,
+                'X-Access-Key': JSONBIN_API_KEY
+            }
         });
 
         if (response.ok) {
             const data = await response.json();
-            const serverHistory = data.bills || [];
-            const serverLastBillNumber = data.lastBillNumber || 0;
+            const cloudHistory = data.record.bills || [];
+            const cloudLastBillNumber = data.record.lastBillNumber || 0;
 
             // Get local history
             const localHistory = getBillHistory();
             const localLastBillNumber = parseInt(localStorage.getItem('lastBillNumber')) || 0;
 
-            // Merge: Use server data as primary, but add any local-only bills
-            const serverBillNumbers = new Set(serverHistory.map(b => b.billNumber));
-            const localOnlyBills = localHistory.filter(b => !serverBillNumbers.has(b.billNumber));
+            // Merge: Cloud is primary, add any local-only bills
+            const cloudBillNumbers = new Set(cloudHistory.map(b => b.billNumber));
+            const localOnlyBills = localHistory.filter(b => !cloudBillNumbers.has(b.billNumber));
 
-            // Combined history: local-only + server
-            const mergedHistory = [...localOnlyBills, ...serverHistory];
-            const maxBillNumber = Math.max(serverLastBillNumber, localLastBillNumber);
+            // Combined history
+            const mergedHistory = [...localOnlyBills, ...cloudHistory];
+            const maxBillNumber = Math.max(cloudLastBillNumber, localLastBillNumber);
 
             // Update localStorage
             saveBillHistory(mergedHistory);
             localStorage.setItem('lastBillNumber', maxBillNumber);
 
-            // If there were local-only bills, sync them to server
+            // If there were local-only bills, upload them to cloud
             if (localOnlyBills.length > 0) {
-                console.log('Uploading local bills to server...');
-                await saveHistoryToServer(mergedHistory);
+                console.log('📤 Uploading ' + localOnlyBills.length + ' local bills to cloud...');
+                await saveHistoryToCloud(mergedHistory);
             }
 
             // Update bill number input
@@ -628,29 +635,33 @@ async function loadHistoryFromServer() {
                 billNumberInput.value = maxBillNumber + 1;
             }
 
-            console.log('✅ Loaded ' + mergedHistory.length + ' bills from server');
-            showNotification('✅ Synced ' + mergedHistory.length + ' bills!');
+            console.log('✅ Loaded ' + mergedHistory.length + ' bills from cloud');
+            showNotification('✅ Synced ' + mergedHistory.length + ' bills from cloud!');
             return mergedHistory;
         } else {
-            console.log('Server sync failed:', response.status);
-            showNotification('⚠️ Server offline - using local data');
+            console.log('Cloud fetch failed:', response.status);
+            showNotification('⚠️ Cloud offline - using local data');
             return getBillHistory();
         }
     } catch (error) {
-        console.error('Server sync error:', error);
-        showNotification('⚠️ Server offline - using local data');
+        console.error('Cloud load error:', error);
+        showNotification('⚠️ Cloud offline - using local data');
         return getBillHistory();
     }
 }
 
-// Save history to server (database.json) - shared with all devices
-async function saveHistoryToServer(history) {
+// Save history to JSONBin.io cloud - SHARES with everyone
+async function saveHistoryToCloud(history) {
     try {
         const lastBillNumber = parseInt(localStorage.getItem('lastBillNumber')) || 0;
 
-        const response = await fetch('/api/save-history', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+        const response = await fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Master-Key': JSONBIN_API_KEY,
+                'X-Access-Key': JSONBIN_API_KEY
+            },
             body: JSON.stringify({
                 bills: history,
                 lastBillNumber: lastBillNumber
@@ -658,49 +669,21 @@ async function saveHistoryToServer(history) {
         });
 
         if (response.ok) {
-            const result = await response.json();
-            console.log('✅ History saved to server:', result.totalBills, 'bills');
+            console.log('✅ Saved ' + history.length + ' bills to cloud (shared with everyone)');
+            // Also save to localStorage as backup
+            saveBillHistory(history);
             return true;
         } else {
-            console.error('Failed to save to server:', response.status);
+            console.error('Failed to save to cloud:', response.status);
+            // Still save to localStorage as fallback
+            saveBillHistory(history);
             return false;
         }
     } catch (error) {
-        console.error('Server save error:', error);
+        console.error('Cloud save error:', error);
+        // Still save to localStorage as fallback
+        saveBillHistory(history);
         return false;
-    }
-}
-
-// For backward compatibility - these functions now use server instead of cloud
-async function loadHistoryFromCloud() {
-    return await loadHistoryFromServer();
-}
-
-async function saveHistoryToCloud(history) {
-    return await saveHistoryToServer(history);
-}
-
-// Initialize sync on page load with retry logic
-async function initCloudSync() {
-    const maxRetries = 3;
-    const retryDelay = 1000;
-
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-        try {
-            console.log(`Server sync attempt ${attempt}/${maxRetries}`);
-            await loadHistoryFromServer();
-            console.log('✅ Server sync successful');
-            return;
-        } catch (error) {
-            console.error(`Server sync attempt ${attempt} failed:`, error);
-
-            if (attempt < maxRetries) {
-                await new Promise(resolve => setTimeout(resolve, retryDelay));
-            } else {
-                showNotification('⚠️ Could not connect to server. Using local data.');
-                console.log('Cloud sync initialization failed after all retries, using local storage');
-            }
-        }
     }
 }
 
@@ -734,43 +717,18 @@ async function saveBillToHistory() {
         billNumberInput.value = getNextBillNumber();
     }
 
-    // Show saving notification
-    showNotification('💾 Saving to cloud...');
-
-    // Save to cloud (JSONBin.io) - THIS IS THE KEY!
-    const cloudSaved = await saveHistoryToCloud(history);
-
-    // Also try to save to local server (database.json file) as backup
-    saveBillToServer(currentBillData);
-
     // Show success notification
-    if (cloudSaved) {
-        showNotification('✅ Bill saved to cloud! (Shared with everyone)');
-    } else {
-        showNotification('✓ Bill saved locally (offline mode)');
-    }
+    showNotification('✅ Bill saved to browser storage!');
+
+    // Also save to cloud storage for persistence
+    await saveHistoryToCloud(history);
 
     // Clear the form after saving
     closeModal();
     clearBill();
 }
 
-// Save bill to server (database.json) - backup local storage
-async function saveBillToServer(billData) {
-    try {
-        const response = await fetch('/api/save-bill', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(billData)
-        });
-        const result = await response.json();
-        if (result.success) {
-            console.log('Bill saved to database.json');
-        }
-    } catch (error) {
-        console.log('Server not running - using cloud and localStorage');
-    }
-}
+
 
 // Show notification
 function showNotification(message) {
