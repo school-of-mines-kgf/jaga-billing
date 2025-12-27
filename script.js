@@ -576,58 +576,91 @@ function saveBillHistory(history) {
     localStorage.setItem('billHistory', JSON.stringify(history));
 }
 
-// ==================== BROWSER STORAGE (Static Site - No Server) ====================
+// ==================== BROWSER STORAGE (Static Site - GitHub Pages) ====================
 
-// Initialize storage on page load
-function initCloudSync() {
-    // Simply load from localStorage - no server sync needed
-    const history = getBillHistory();
-    console.log('📦 Loaded ' + history.length + ' bills from browser storage');
+// Initialize storage on page load - loads from database.json if localStorage is empty
+async function initCloudSync() {
+    const localHistory = getBillHistory();
 
-    if (history.length > 0) {
-        showNotification('✅ Loaded ' + history.length + ' saved bills');
+    // If localStorage is empty, load from database.json (initial data)
+    if (localHistory.length === 0) {
+        console.log('📦 No local data found, loading from database.json...');
+        await loadInitialDataFromJSON();
+    } else {
+        console.log('📦 Loaded ' + localHistory.length + ' bills from browser storage');
+        showNotification('✅ Loaded ' + localHistory.length + ' saved bills');
     }
 }
 
-// Load history from JSONBin.io cloud - SHARED with everyone
-async function loadHistoryFromCloud() {
+// Load initial data from database.json file (for first-time visitors)
+async function loadInitialDataFromJSON() {
     try {
-        showNotification('🔄 Loading shared history from cloud...');
+        showNotification('🔄 Loading bill history...');
 
-        const response = await fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}/latest`, {
-            method: 'GET',
-            headers: {
-                'X-Master-Key': JSONBIN_API_KEY,
-                'X-Access-Key': JSONBIN_API_KEY
-            }
-        });
+        const response = await fetch('./database.json');
 
         if (response.ok) {
             const data = await response.json();
-            const cloudHistory = data.record.bills || [];
-            const cloudLastBillNumber = data.record.lastBillNumber || 0;
+            const initialHistory = data.bills || [];
+            const lastBillNumber = data.lastBillNumber || 0;
 
-            // Get local history
-            const localHistory = getBillHistory();
-            const localLastBillNumber = parseInt(localStorage.getItem('lastBillNumber')) || 0;
+            // Save to localStorage
+            saveBillHistory(initialHistory);
+            localStorage.setItem('lastBillNumber', lastBillNumber);
 
-            // Merge: Cloud is primary, add any local-only bills
-            const cloudBillNumbers = new Set(cloudHistory.map(b => b.billNumber));
-            const localOnlyBills = localHistory.filter(b => !cloudBillNumbers.has(b.billNumber));
+            // Update bill number input
+            const billNumberInput = document.getElementById('billNumber');
+            if (billNumberInput) {
+                billNumberInput.value = lastBillNumber + 1;
+            }
 
-            // Combined history
-            const mergedHistory = [...localOnlyBills, ...cloudHistory];
-            const maxBillNumber = Math.max(cloudLastBillNumber, localLastBillNumber);
+            console.log('✅ Loaded ' + initialHistory.length + ' bills from database.json');
+            showNotification('✅ Loaded ' + initialHistory.length + ' bills!');
+            return initialHistory;
+        } else {
+            console.log('Failed to load database.json:', response.status);
+            showNotification('⚠️ Starting fresh');
+            return [];
+        }
+    } catch (error) {
+        console.error('Error loading database.json:', error);
+        showNotification('⚠️ Starting fresh');
+        return [];
+    }
+}
+
+// Load history from cloud (now loads from database.json for GitHub Pages)
+async function loadHistoryFromCloud() {
+    try {
+        showNotification('🔄 Loading history...');
+
+        // First check localStorage
+        const localHistory = getBillHistory();
+        const localLastBillNumber = parseInt(localStorage.getItem('lastBillNumber')) || 0;
+
+        // Try to load from database.json to get any updates
+        const response = await fetch('./database.json?' + Date.now()); // Cache busting
+
+        if (response.ok) {
+            const data = await response.json();
+            const jsonHistory = data.bills || [];
+            const jsonLastBillNumber = data.lastBillNumber || 0;
+
+            // Merge: combine both sources, local takes priority for newer bills
+            const jsonBillNumbers = new Set(jsonHistory.map(b => String(b.billNumber)));
+            const localOnlyBills = localHistory.filter(b => !jsonBillNumbers.has(String(b.billNumber)));
+
+            // Combine: local-only bills + JSON bills
+            const mergedHistory = [...localOnlyBills, ...jsonHistory];
+
+            // Sort by bill number descending
+            mergedHistory.sort((a, b) => parseInt(b.billNumber) - parseInt(a.billNumber));
+
+            const maxBillNumber = Math.max(jsonLastBillNumber, localLastBillNumber);
 
             // Update localStorage
             saveBillHistory(mergedHistory);
             localStorage.setItem('lastBillNumber', maxBillNumber);
-
-            // If there were local-only bills, upload them to cloud
-            if (localOnlyBills.length > 0) {
-                console.log('📤 Uploading ' + localOnlyBills.length + ' local bills to cloud...');
-                await saveHistoryToCloud(mergedHistory);
-            }
 
             // Update bill number input
             const billNumberInput = document.getElementById('billNumber');
@@ -635,18 +668,19 @@ async function loadHistoryFromCloud() {
                 billNumberInput.value = maxBillNumber + 1;
             }
 
-            console.log('✅ Loaded ' + mergedHistory.length + ' bills from cloud');
-            showNotification('✅ Synced ' + mergedHistory.length + ' bills from cloud!');
+            console.log('✅ Synced ' + mergedHistory.length + ' bills');
+            showNotification('✅ Loaded ' + mergedHistory.length + ' bills!');
             return mergedHistory;
         } else {
-            console.log('Cloud fetch failed:', response.status);
-            showNotification('⚠️ Cloud offline - using local data');
-            return getBillHistory();
+            // Fallback to localStorage only
+            showNotification('✅ Loaded ' + localHistory.length + ' bills');
+            return localHistory;
         }
     } catch (error) {
-        console.error('Cloud load error:', error);
-        showNotification('⚠️ Cloud offline - using local data');
-        return getBillHistory();
+        console.error('Sync error:', error);
+        const localHistory = getBillHistory();
+        showNotification('✅ Loaded ' + localHistory.length + ' bills');
+        return localHistory;
     }
 }
 
