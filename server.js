@@ -43,7 +43,7 @@ const mimeTypes = {
 const server = http.createServer((req, res) => {
     // Enable CORS
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
     if (req.method === 'OPTIONS') {
@@ -52,7 +52,120 @@ const server = http.createServer((req, res) => {
         return;
     }
 
+
     // API endpoints
+
+    // Get all bills - NEW ENDPOINT
+    if (req.url === '/api/bills' && req.method === 'GET') {
+        const db = readDatabase();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+            success: true,
+            bills: db.bills || [],
+            lastBillNumber: db.lastBillNumber || 0,
+            count: (db.bills || []).length
+        }));
+        return;
+    }
+
+    // Save/Update a single bill - NEW ENDPOINT
+    if (req.url === '/api/bills' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        req.on('end', () => {
+            try {
+                const billData = JSON.parse(body);
+                const db = readDatabase();
+
+                // Check if bill already exists
+                const existingIndex = db.bills.findIndex(b =>
+                    String(b.billNumber) === String(billData.billNumber)
+                );
+
+                if (existingIndex >= 0) {
+                    // Update existing bill
+                    db.bills[existingIndex] = billData;
+                } else {
+                    // Add new bill
+                    db.bills.unshift(billData);
+                }
+
+                // Update last bill number
+                const billNum = parseInt(billData.billNumber) || 0;
+                db.lastBillNumber = Math.max(db.lastBillNumber || 0, billNum);
+
+                writeDatabase(db);
+
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({
+                    success: true,
+                    message: `Bill #${billData.billNumber} saved successfully!`
+                }));
+            } catch (error) {
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: false, error: error.message }));
+            }
+        });
+        return;
+    }
+
+    // Sync full history - NEW ENDPOINT
+    if (req.url === '/api/bills/sync' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        req.on('end', () => {
+            try {
+                const { bills, lastBillNumber } = JSON.parse(body);
+                const db = readDatabase();
+
+                // Replace entire history with synced data
+                db.bills = bills || [];
+                db.lastBillNumber = lastBillNumber || 0;
+
+                writeDatabase(db);
+
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({
+                    success: true,
+                    message: 'History synced!',
+                    totalBills: db.bills.length
+                }));
+            } catch (error) {
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: false, error: error.message }));
+            }
+        });
+        return;
+    }
+
+    // Delete a bill - NEW ENDPOINT
+    if (req.url.startsWith('/api/bills/') && req.method === 'DELETE') {
+        const billNumber = req.url.split('/api/bills/')[1];
+        const db = readDatabase();
+
+        const originalLength = db.bills.length;
+        db.bills = db.bills.filter(b => String(b.billNumber) !== String(billNumber));
+
+        if (db.bills.length === originalLength) {
+            res.writeHead(404, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+                success: false,
+                error: `Bill #${billNumber} not found`
+            }));
+            return;
+        }
+
+        writeDatabase(db);
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+            success: true,
+            message: `Bill #${billNumber} deleted successfully!`
+        }));
+        return;
+    }
+
+    // Legacy endpoints for backward compatibility
     if (req.url === '/api/database' && req.method === 'GET') {
         const db = readDatabase();
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -67,20 +180,6 @@ const server = http.createServer((req, res) => {
             try {
                 const billData = JSON.parse(body);
                 const db = readDatabase();
-
-                // Add customer if not exists
-                const existingCustomer = db.customers.find(c =>
-                    c.phone === billData.customerPhone
-                );
-
-                if (!existingCustomer) {
-                    db.customers.push({
-                        name: billData.customerName,
-                        phone: billData.customerPhone,
-                        address: billData.customerAddress,
-                        addedAt: new Date().toISOString()
-                    });
-                }
 
                 // Add bill
                 db.bills.unshift(billData);
@@ -105,7 +204,6 @@ const server = http.createServer((req, res) => {
         return;
     }
 
-    // Get all history (for syncing across devices)
     if (req.url === '/api/get-history' && req.method === 'GET') {
         const db = readDatabase();
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -117,7 +215,6 @@ const server = http.createServer((req, res) => {
         return;
     }
 
-    // Save full history (for syncing from client)
     if (req.url === '/api/save-history' && req.method === 'POST') {
         let body = '';
         req.on('data', chunk => body += chunk);

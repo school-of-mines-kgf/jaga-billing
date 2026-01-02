@@ -451,36 +451,51 @@ async function autoSaveBillToHistory() {
         return;
     }
 
-    const history = getBillHistory();
-
-    // Check if bill already exists
-    const exists = history.some(bill => bill.billNumber === currentBillData.billNumber);
-    if (exists) {
-        // Bill already saved, skip auto-save
-        console.log('Bill already exists in history, skipping auto-save');
-        return;
-    }
-
-    // Save to localStorage first
-    history.unshift(currentBillData);
-    saveBillHistory(history);
-
-    // Save the bill number for next bill
-    saveLastBillNumber(currentBillData.billNumber);
-
     // Show saving notification
-    showNotification('💾 Auto-saving bill...');
+    showNotification('💾 Saving bill to server...');
 
-    // Save to browser storage
-    await saveHistoryToCloud(history);
+    try {
+        // Save directly to server API
+        const response = await fetch(`${API_BASE_URL}/bills`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(currentBillData)
+        });
 
-    // Show success notification
-    showNotification('✅ Bill auto-saved!');
+        if (response.ok) {
+            const result = await response.json();
+            console.log('✅ Bill saved to server:', result);
 
-    // Update bill number for next bill
-    const billNumberInput = document.getElementById('billNumber');
-    if (billNumberInput) {
-        billNumberInput.value = getNextBillNumber();
+            // Also update localStorage cache
+            const history = getBillHistory();
+            const existingIndex = history.findIndex(b => b.billNumber === currentBillData.billNumber);
+            if (existingIndex >= 0) {
+                history[existingIndex] = currentBillData;
+            } else {
+                history.unshift(currentBillData);
+            }
+            saveBillHistory(history);
+
+            // Save the bill number for next bill
+            saveLastBillNumber(currentBillData.billNumber);
+
+            // Show success notification
+            showNotification('✅ Bill saved! Everyone can see it now.');
+
+            // Update bill number for next bill
+            const billNumberInput = document.getElementById('billNumber');
+            if (billNumberInput) {
+                billNumberInput.value = getNextBillNumber();
+            }
+        } else {
+            console.error('Failed to save bill to server:', response.status);
+            showNotification('⚠️ Could not save to server');
+        }
+    } catch (error) {
+        console.error('Error saving bill:', error);
+        showNotification('⚠️ Could not save to server');
     }
 }
 
@@ -576,125 +591,79 @@ function saveBillHistory(history) {
     localStorage.setItem('billHistory', JSON.stringify(history));
 }
 
-// ==================== BROWSER STORAGE (Static Site - GitHub Pages) ====================
+// ==================== SERVER API STORAGE (SHARED FOR EVERYONE) ====================
 
-// Initialize storage on page load - loads from database.json if localStorage is empty
+// API Base URL - change this when deploying
+const API_BASE_URL = window.location.hostname === 'localhost'
+    ? 'http://localhost:3000/api'
+    : 'https://yesh-bill.vercel.app/api';
+
+// Initialize - Load shared history from server API
 async function initCloudSync() {
-    const localHistory = getBillHistory();
-
-    // If localStorage is empty, load from database.json (initial data)
-    if (localHistory.length === 0) {
-        console.log('📦 No local data found, loading from database.json...');
-        await loadInitialDataFromJSON();
-    } else {
-        console.log('📦 Loaded ' + localHistory.length + ' bills from browser storage');
-        showNotification('✅ Loaded ' + localHistory.length + ' saved bills');
-    }
-}
-
-// Load initial data from database.json file (for first-time visitors)
-async function loadInitialDataFromJSON() {
     try {
-        showNotification('🔄 Loading bill history...');
-
-        const response = await fetch('./database.json');
-
-        if (response.ok) {
-            const data = await response.json();
-            const initialHistory = data.bills || [];
-            const lastBillNumber = data.lastBillNumber || 0;
-
-            // Save to localStorage
-            saveBillHistory(initialHistory);
-            localStorage.setItem('lastBillNumber', lastBillNumber);
-
-            // Update bill number input
-            const billNumberInput = document.getElementById('billNumber');
-            if (billNumberInput) {
-                billNumberInput.value = lastBillNumber + 1;
-            }
-
-            console.log('✅ Loaded ' + initialHistory.length + ' bills from database.json');
-            showNotification('✅ Loaded ' + initialHistory.length + ' bills!');
-            return initialHistory;
-        } else {
-            console.log('Failed to load database.json:', response.status);
-            showNotification('⚠️ Starting fresh');
-            return [];
-        }
+        console.log('📦 Loading shared bill history from server...');
+        await loadHistoryFromCloud();
     } catch (error) {
-        console.error('Error loading database.json:', error);
-        showNotification('⚠️ Starting fresh');
-        return [];
+        console.error('Failed to load from server:', error);
+        showNotification('⚠️ Could not connect to server');
     }
 }
 
-// Load history from cloud (now loads from database.json for GitHub Pages)
+// Load history from server API - SHARED FOR EVERYONE
 async function loadHistoryFromCloud() {
     try {
-        showNotification('🔄 Loading history...');
+        showNotification('🔄 Loading shared history...');
 
-        // First check localStorage
-        const localHistory = getBillHistory();
-        const localLastBillNumber = parseInt(localStorage.getItem('lastBillNumber')) || 0;
-
-        // Try to load from database.json to get any updates
-        const response = await fetch('./database.json?' + Date.now()); // Cache busting
+        const response = await fetch(`${API_BASE_URL}/bills`, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
 
         if (response.ok) {
             const data = await response.json();
-            const jsonHistory = data.bills || [];
-            const jsonLastBillNumber = data.lastBillNumber || 0;
+            const serverHistory = data.bills || [];
+            const serverLastBillNumber = data.lastBillNumber || 0;
 
-            // Merge: combine both sources, local takes priority for newer bills
-            const jsonBillNumbers = new Set(jsonHistory.map(b => String(b.billNumber)));
-            const localOnlyBills = localHistory.filter(b => !jsonBillNumbers.has(String(b.billNumber)));
-
-            // Combine: local-only bills + JSON bills
-            const mergedHistory = [...localOnlyBills, ...jsonHistory];
-
-            // Sort by bill number descending
-            mergedHistory.sort((a, b) => parseInt(b.billNumber) - parseInt(a.billNumber));
-
-            const maxBillNumber = Math.max(jsonLastBillNumber, localLastBillNumber);
-
-            // Update localStorage
-            saveBillHistory(mergedHistory);
-            localStorage.setItem('lastBillNumber', maxBillNumber);
+            // Save to localStorage as cache
+            saveBillHistory(serverHistory);
+            localStorage.setItem('lastBillNumber', serverLastBillNumber);
 
             // Update bill number input
             const billNumberInput = document.getElementById('billNumber');
             if (billNumberInput) {
-                billNumberInput.value = maxBillNumber + 1;
+                billNumberInput.value = serverLastBillNumber + 1;
             }
 
-            console.log('✅ Synced ' + mergedHistory.length + ' bills');
-            showNotification('✅ Loaded ' + mergedHistory.length + ' bills!');
-            return mergedHistory;
+            console.log('✅ Loaded ' + serverHistory.length + ' bills from server (shared with everyone)');
+            showNotification('✅ Loaded ' + serverHistory.length + ' shared bills!');
+            return serverHistory;
         } else {
-            // Fallback to localStorage only
-            showNotification('✅ Loaded ' + localHistory.length + ' bills');
+            console.error('Failed to load from server:', response.status);
+            // Fallback to localStorage
+            const localHistory = getBillHistory();
+            showNotification('⚠️ Using local cache (' + localHistory.length + ' bills)');
             return localHistory;
         }
     } catch (error) {
-        console.error('Sync error:', error);
+        console.error('Server load error:', error);
+        // Fallback to localStorage
         const localHistory = getBillHistory();
-        showNotification('✅ Loaded ' + localHistory.length + ' bills');
+        showNotification('⚠️ Using local cache (' + localHistory.length + ' bills)');
         return localHistory;
     }
 }
 
-// Save history to JSONBin.io cloud - SHARES with everyone
+// Save history to server API - SHARES with everyone
 async function saveHistoryToCloud(history) {
     try {
         const lastBillNumber = parseInt(localStorage.getItem('lastBillNumber')) || 0;
 
-        const response = await fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`, {
-            method: 'PUT',
+        const response = await fetch(`${API_BASE_URL}/bills/sync`, {
+            method: 'POST',
             headers: {
-                'Content-Type': 'application/json',
-                'X-Master-Key': JSONBIN_API_KEY,
-                'X-Access-Key': JSONBIN_API_KEY
+                'Content-Type': 'application/json'
             },
             body: JSON.stringify({
                 bills: history,
@@ -703,20 +672,22 @@ async function saveHistoryToCloud(history) {
         });
 
         if (response.ok) {
-            console.log('✅ Saved ' + history.length + ' bills to cloud (shared with everyone)');
-            // Also save to localStorage as backup
+            console.log('✅ Saved ' + history.length + ' bills to server (shared with everyone)');
+            // Also save to localStorage as cache
             saveBillHistory(history);
             return true;
         } else {
-            console.error('Failed to save to cloud:', response.status);
+            console.error('Failed to save to server:', response.status);
             // Still save to localStorage as fallback
             saveBillHistory(history);
+            showNotification('⚠️ Saved locally only');
             return false;
         }
     } catch (error) {
-        console.error('Cloud save error:', error);
+        console.error('Server save error:', error);
         // Still save to localStorage as fallback
         saveBillHistory(history);
+        showNotification('⚠️ Saved locally only');
         return false;
     }
 }
@@ -995,19 +966,37 @@ async function deleteHistoryBill(index) {
     }
 
     const history = getBillHistory();
-    history.splice(index, 1);
-    saveBillHistory(history);
+    const billToDelete = history[index];
 
-    // Save to cloud to persist deletion
-    showNotification('💾 Syncing deletion to cloud...');
-    const cloudSaved = await saveHistoryToCloud(history);
+    if (!billToDelete) {
+        showNotification('⚠️ Bill not found');
+        return;
+    }
 
-    renderHistory();
+    showNotification('💾 Deleting bill from server...');
 
-    if (cloudSaved) {
-        showNotification('✅ Bill deleted and synced to cloud');
-    } else {
-        showNotification('Bill deleted locally (offline mode)');
+    try {
+        // Delete from server API
+        const response = await fetch(`${API_BASE_URL}/bills/${billToDelete.billNumber}`, {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+
+        if (response.ok) {
+            // Update local cache
+            history.splice(index, 1);
+            saveBillHistory(history);
+            renderHistory();
+            showNotification('✅ Bill deleted! Everyone will see the update.');
+        } else {
+            console.error('Failed to delete from server:', response.status);
+            showNotification('⚠️ Could not delete from server');
+        }
+    } catch (error) {
+        console.error('Error deleting bill:', error);
+        showNotification('⚠️ Could not delete from server');
     }
 }
 
