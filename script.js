@@ -602,10 +602,12 @@ const API_BASE_URL = window.location.hostname === 'localhost'
 async function initCloudSync() {
     try {
         console.log('📦 Loading shared bill history from server...');
+        // ALWAYS load from server - ignore localStorage on startup
+        // This ensures everyone gets the same fresh data
         await loadHistoryFromCloud();
     } catch (error) {
         console.error('Failed to load from server:', error);
-        showNotification('⚠️ Could not connect to server');
+        showNotification('⚠️ Could not connect to server - using offline mode');
     }
 }
 
@@ -747,10 +749,14 @@ function showNotification(message) {
     }, 3000);
 }
 
-// Show history modal
+// Show history modal - ALWAYS loads fresh from server
 async function showHistory() {
-    // Load from cloud first to get latest data
+    showNotification('🔄 Loading latest bills from server...');
+
+    // ALWAYS load fresh from server - don't use cache
     await loadHistoryFromCloud();
+
+    // Now render the fresh data
     renderHistory();
     historyModal.classList.remove('hidden');
 }
@@ -760,8 +766,26 @@ function closeHistoryModal() {
     historyModal.classList.add('hidden');
 }
 
-// Render history
+// Manual sync with server - clears cache and reloads from server
+async function syncWithServer() {
+    showNotification('🔄 Syncing with server...');
+
+    // Clear localStorage cache
+    localStorage.removeItem('billHistory');
+
+    // Load fresh from server
+    await loadHistoryFromCloud();
+
+    // Re-render the history
+    renderHistory();
+
+    showNotification('✅ Synced! Showing latest from server.');
+}
+
+
+// Render history - uses the data fetched from server
 function renderHistory() {
+    // Get from localStorage (which was just updated from server)
     const history = getBillHistory();
 
     if (history.length === 0) {

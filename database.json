@@ -1,27 +1,27 @@
 {
-  "lastBillNumber": 11,
+  "lastBillNumber": 12,
   "bills": [
     {
-      "billNumber": "11",
-      "customerName": "gh",
-      "customerPhone": "6555",
-      "customerAddress": "jk",
-      "billDate": "2025-12-26",
-      "formattedDate": "26 December 2025",
+      "billNumber": "12",
+      "customerName": "kill",
+      "customerPhone": "4521",
+      "customerAddress": "ikjl",
+      "billDate": "2026-01-02",
+      "formattedDate": "2 January 2026",
       "items": [
         {
           "id": 1,
-          "name": "milk",
+          "name": "hk",
           "qty": 1,
-          "price": 5632,
-          "courier": 123,
-          "total": 5755
+          "price": 452,
+          "courier": 5,
+          "total": 457
         }
       ],
-      "subtotal": 5755,
-      "courierCharges": 123,
-      "grandTotal": 5878,
-      "createdAt": "2025-12-26T12:33:31.995Z"
+      "subtotal": 457,
+      "courierCharges": 5,
+      "grandTotal": 462,
+      "createdAt": "2026-01-02T14:09:31.471Z"
     },
     {
       "billNumber": "10",
